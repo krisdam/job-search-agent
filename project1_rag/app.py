@@ -32,7 +32,7 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq")
 # ── Page Config ─────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="Ask Krishna — Career Q&A",
+    page_title="Ask KD — Career Q&A",
     page_icon="🔍",
     layout="centered",
 )
@@ -73,7 +73,7 @@ st.markdown("""
 
 st.markdown("""
 <div class="main-header">
-    <h1>🔍 Ask Krishna</h1>
+    <h1>🔍 Ask KD</h1>
     <p>Ask anything about my professional experience — powered by RAG</p>
 </div>
 """, unsafe_allow_html=True)
