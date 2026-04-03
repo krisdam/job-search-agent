@@ -6,8 +6,6 @@ langchain-anthropic
 sentence-transformers
 chromadb
 pymupdf
-unstructured
 markdown
-python-docx
 python-dotenv
 tiktoken

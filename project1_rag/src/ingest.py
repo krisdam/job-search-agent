@@ -58,7 +58,7 @@ def load_documents(data_dir: str):
     md_loader = DirectoryLoader(
         data_dir,
         glob="**/*.md",
-        loader_cls=UnstructuredMarkdownLoader,
+        loader_cls=TextLoader,
         show_progress=True,
     )
     documents.extend(md_loader.load())
