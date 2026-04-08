@@ -1,14 +1,13 @@
 """
-Streamlit Frontend — Career Q&A
+Streamlit Frontend — Career Q&A (numpy vector search, no FAISS/ChromaDB)
 """
 import streamlit as st
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
-import os
+import numpy as np
+import os, pickle
 
 load_dotenv()
 
@@ -36,9 +35,77 @@ st.markdown("""
 st.divider()
 
 @st.cache_resource
-def load_vectorstore():
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL, model_kwargs={"device": "cpu"})
-    return FAISS.load_local(FAISS_DIR, embeddings, allow_dangerous_deserialization=True)
+def load_embedder():
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer(EMBEDDING_MODEL)
+
+@st.cache_resource
+def load_index():
+    pkl_path = os.path.join(FAISS_DIR, "index.pkl")
+    with open(pkl_path, "rb") as f:
+        data = pickle.load(f)
+    # data is a dict with docstore and index_to_docstore_id from FAISS
+    # Instead load our custom numpy index if present, else fall back
+    numpy_path = os.path.join(FAISS_DIR, "numpy_index.pkl")
+    if os.path.exists(numpy_path):
+        with open(numpy_path, "rb") as f:
+            return pickle.load(f)
+    return None
+
+@st.cache_resource
+def build_numpy_store():
+    """Load docs from data folder and build in-memory numpy index."""
+    import glob
+    embedder = load_embedder()
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    
+    texts = []
+    sources = []
+    
+    # Load markdown files
+    for path in glob.glob(os.path.join(data_dir, "*.md")):
+        with open(path, "r") as f:
+            content = f.read()
+        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        chunks = splitter.split_text(content)
+        for chunk in chunks:
+            texts.append(chunk)
+            sources.append(os.path.basename(path))
+    
+    # Load PDFs
+    for path in glob.glob(os.path.join(data_dir, "*.pdf")):
+        try:
+            import fitz
+            doc = fitz.open(path)
+            content = ""
+            for page in doc:
+                content += page.get_text()
+            splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+            chunks = splitter.split_text(content)
+            for chunk in chunks:
+                texts.append(chunk)
+                sources.append(os.path.basename(path))
+        except Exception as e:
+            st.warning(f"Could not load {path}: {e}")
+    
+    if not texts:
+        st.error("No documents found in data folder!")
+        st.stop()
+    
+    embeddings = embedder.encode(texts, show_progress_bar=False)
+    return {"texts": texts, "sources": sources, "embeddings": embeddings}
+
+def similarity_search(query, store, embedder, k=4):
+    query_vec = embedder.encode([query])[0]
+    embeddings = store["embeddings"]
+    scores = np.dot(embeddings, query_vec) / (
+        np.linalg.norm(embeddings, axis=1) * np.linalg.norm(query_vec) + 1e-10
+    )
+    top_k = np.argsort(scores)[::-1][:k]
+    results = []
+    for i in top_k:
+        results.append({"text": store["texts"][i], "source": store["sources"][i]})
+    return results
 
 @st.cache_resource
 def get_llm():
@@ -68,25 +135,12 @@ Question: {question}
 Answer:
 """)
 
-def format_docs(docs):
-    return "\n\n---\n\n".join(
-        f"[Source: {os.path.basename(d.metadata.get('source','unknown'))}]\n{d.page_content}"
-        for d in docs
-    )
+embedder = load_embedder()
+store = build_numpy_store()
+llm = get_llm()
+chain = RAG_PROMPT | llm | StrOutputParser()
 
-@st.cache_resource
-def build_chain():
-    vectorstore = load_vectorstore()
-    llm = get_llm()
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
-    chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | RAG_PROMPT | llm | StrOutputParser()
-    )
-    return chain, vectorstore
-
-chain, vectorstore = build_chain()
-st.caption(f"📚 Knowledge base: {vectorstore.index.ntotal} embedded chunks")
+st.caption(f"📚 Knowledge base: {len(store['texts'])} embedded chunks")
 
 st.markdown("**Try asking:**")
 col1, col2 = st.columns(2)
@@ -128,11 +182,15 @@ if user_input:
     with st.chat_message("assistant"):
         with st.spinner("Searching experience and generating answer..."):
             try:
-                response = chain.invoke(user_input)
+                docs = similarity_search(user_input, store, embedder)
+                context = "\n\n---\n\n".join(
+                    f"[Source: {d['source']}]\n{d['text']}" for d in docs
+                )
+                response = chain.invoke({"context": context, "question": user_input})
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
             except Exception as e:
                 st.error(f"Something went wrong: {str(e)}")
 
 st.divider()
-st.caption("Built with LangChain + FAISS + Groq | [View source](https://github.com/krisdam) | RAG-powered career Q&A")
+st.caption("Built with LangChain + Numpy + Groq | [View source](https://github.com/krisdam) | RAG-powered career Q&A")
