@@ -23,7 +23,7 @@ from langchain_community.document_loaders import (
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS
 from dotenv import load_dotenv
 import os
 
@@ -32,7 +32,7 @@ load_dotenv()
 # ── 2. Configuration ───────────────────────────────────────────────────────
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-CHROMA_DIR = os.environ.get("CHROMA_PERSIST_DIR", "./chroma_db")
+FAISS_DIR = os.environ.get("FAISS_DIR", "./faiss_index")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 
 # Chunking parameters — tune these as you learn
@@ -126,7 +126,7 @@ def chunk_documents(documents, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
 
 # ── 5. Embed & Store ───────────────────────────────────────────────────────
 
-def embed_and_store(chunks, persist_dir=CHROMA_DIR, model_name=EMBEDDING_MODEL):
+def embed_and_store(chunks, persist_dir=FAISS_DIR, model_name=EMBEDDING_MODEL):
     """
     Convert chunks into vectors and store in ChromaDB.
 
@@ -149,14 +149,11 @@ def embed_and_store(chunks, persist_dir=CHROMA_DIR, model_name=EMBEDDING_MODEL):
     )
 
     print(f"⏳ Embedding {len(chunks)} chunks and storing in ChromaDB...")
-    vectorstore = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=persist_dir,
-    )
+    vectorstore = FAISS.from_documents(documents=chunks, embedding=embeddings)
+    vectorstore.save_local(persist_dir)
 
-    print(f"✅ Vector store created at {persist_dir}")
-    print(f"   Collection size: {vectorstore._collection.count()} vectors")
+    print(f"✅ Vector store saved to {persist_dir}")
+    print(f"   Total vectors: {vectorstore.index.ntotal}")
 
     return vectorstore
 
